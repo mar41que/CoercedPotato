@@ -1,5 +1,5 @@
 
-name: Build CoercedPotato x64
+name: Build CoercedPotato x64 Static
 
 on:
   workflow_dispatch:
@@ -9,21 +9,13 @@ jobs:
     runs-on: windows-2022
 
     steps:
-      - name: Checkout source and submodules
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
-
-      - name: Verify dependencies
-        shell: pwsh
-        run: |
-          if (!(Test-Path "win32errorcodes/c/win32errors.h")) {
-            throw "Missing win32errorcodes submodule"
-          }
-          Write-Host "Dependencies OK"
 
       - name: Fix Windows error constants
         shell: pwsh
@@ -43,31 +35,54 @@ jobs:
           }
 
           Set-Content -Path $file -Value $source -Encoding utf8
-          Write-Host "Windows error constants verified/fixed"
+
+      - name: Configure static runtime for Release x64
+        shell: pwsh
+        run: |
+          $path = "CoercedPotato.vcxproj"
+          [xml]$project = Get-Content $path -Raw
+
+          $group = @($project.Project.ItemDefinitionGroup) |
+            Where-Object { $_.Condition -like "*Release|x64*" } |
+            Select-Object -First 1
+
+          if ($null -eq $group) {
+            throw "Release|x64 configuration not found"
+          }
+
+          $compile = $group.ClCompile
+
+          $existing = $compile.SelectSingleNode(
+            "*[local-name()='RuntimeLibrary']"
+          )
+
+          if ($null -ne $existing) {
+            $existing.InnerText = "MultiThreaded"
+          } else {
+            $node = $project.CreateElement(
+              "RuntimeLibrary",
+              $project.DocumentElement.NamespaceURI
+            )
+            $node.InnerText = "MultiThreaded"
+            [void]$compile.AppendChild($node)
+          }
+
+          $project.Save((Resolve-Path $path).Path)
+
+          Write-Host "Release x64 runtime configured: /MT"
 
       - name: Build Release x64
         shell: pwsh
         run: |
-          msbuild CoercedPotato.sln /m /p:Configuration=Release /p:Platform=x64
+          msbuild CoercedPotato.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64
 
-      - name: Locate compiled EXE
-        shell: pwsh
-        run: |
-          $exe = Get-ChildItem -Path . -Recurse -Filter "CoercedPotato.exe" -File |
-            Where-Object { $_.FullName -match "Release" } |
-            Select-Object -First 1
-
-          if (!$exe) {
-            throw "CoercedPotato.exe was not generated"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Build failed"
           }
 
-          New-Item -ItemType Directory -Force -Path artifact | Out-Null
-          Copy-Item $exe.FullName "artifact/CoercedPotato.exe"
-          Write-Host "Built executable: $($exe.FullName)"
-
-      - name: Upload compiled EXE
+      - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
-          name: CoercedPotato-x64
-          path: artifact/CoercedPotato.exe
+          name: CoercedPotato-x64-static
+          path: x64/Release/CoercedPotato.exe
           if-no-files-found: error
