@@ -1,0 +1,29 @@
+name: Build CoercedPotato x64
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout source and submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build Release x64
+        shell: pwsh
+        run: |
+          msbuild CoercedPotato.sln /m /p:Configuration=Release /p:Platform=x64
+
+      - name: Upload compiled EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: CoercedPotato-x64
+          path: x64/Release/CoercedPotato.exe
+          if-no-files-found: error
