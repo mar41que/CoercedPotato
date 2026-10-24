@@ -1,3 +1,4 @@
+
 name: Build CoercedPotato x64
 
 on:
@@ -16,14 +17,57 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
+      - name: Verify dependencies
+        shell: pwsh
+        run: |
+          if (!(Test-Path "win32errorcodes/c/win32errors.h")) {
+            throw "Missing win32errorcodes submodule"
+          }
+          Write-Host "Dependencies OK"
+
+      - name: Fix Windows error constants
+        shell: pwsh
+        run: |
+          $file = "CoercedPotato.cpp"
+          $source = Get-Content $file -Raw
+
+          $replacements = @{
+            "WIN32ERR_ERROR_BAD_NETPATH" = "ERROR_BAD_NETPATH"
+            "WIN32ERR_ERROR_SUCCESS" = "ERROR_SUCCESS"
+            "WIN32ERR_ERROR_ACCESS_DENIED" = "ERROR_ACCESS_DENIED"
+            "WIN32ERR_ERROR_NOT_SUPPORTED" = "ERROR_NOT_SUPPORTED"
+          }
+
+          foreach ($old in $replacements.Keys) {
+            $source = $source.Replace($old, $replacements[$old])
+          }
+
+          Set-Content -Path $file -Value $source -Encoding utf8
+          Write-Host "Windows error constants verified/fixed"
+
       - name: Build Release x64
         shell: pwsh
         run: |
           msbuild CoercedPotato.sln /m /p:Configuration=Release /p:Platform=x64
 
+      - name: Locate compiled EXE
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path . -Recurse -Filter "CoercedPotato.exe" -File |
+            Where-Object { $_.FullName -match "Release" } |
+            Select-Object -First 1
+
+          if (!$exe) {
+            throw "CoercedPotato.exe was not generated"
+          }
+
+          New-Item -ItemType Directory -Force -Path artifact | Out-Null
+          Copy-Item $exe.FullName "artifact/CoercedPotato.exe"
+          Write-Host "Built executable: $($exe.FullName)"
+
       - name: Upload compiled EXE
         uses: actions/upload-artifact@v4
         with:
           name: CoercedPotato-x64
-          path: x64/Release/CoercedPotato.exe
+          path: artifact/CoercedPotato.exe
           if-no-files-found: error
